@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <typeindex>
 #include <unordered_map>
 #include <vector>

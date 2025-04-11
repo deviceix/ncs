@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstring>
 #include <ncs/world.hpp>
 
 namespace ncs
@@ -242,7 +243,7 @@ namespace ncs
 				const Column &src_col = source->columns[comp];
 				const Column &dst_col = destination->columns[comp];
 
-				memcpy(
+				std::memcpy(
 					static_cast<char *>(dst_col.data) + (dest_row * dst_col.size),
 					static_cast<char *>(src_col.data) + (src_row * src_col.size),
 					src_col.size
@@ -256,5 +257,4 @@ namespace ncs
 		record.row = dest_row;
 		entity_records[entity_id] = record;
 	}
-
 }
