@@ -44,8 +44,6 @@ namespace ncs
 
         static Generation get_egen(Entity e);
 
-        /* TODO: archetype utils */
-
     private:
         template<typename T>
         Component get_cid()
@@ -68,6 +66,14 @@ namespace ncs
 				};
 			}
 			return id;
+        }
+
+    	template<typename T>
+		T *get_component_ptr(Archetype *archetype, const size_t row)
+        {
+        	const Component cid = get_cid<T>();
+        	const Column &column = archetype->columns.at(cid);
+        	return reinterpret_cast<T *>(static_cast<char *>(column.data) + (row * column.size));
         }
 
         Archetype *create_archetype(const std::vector<Component> &components);

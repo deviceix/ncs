@@ -116,6 +116,71 @@ namespace ncs
 		entity_indices.erase(entity_id); /* clean up entity index */
 	}
 
+	Entity World::encode_entity(const uint64_t id, const Generation gen)
+    {
+    	return (static_cast<Entity>(gen) << GENERATION_SHIFT) | (id & ENTITY_MASK);
+    }
+
+	uint64_t World::get_eid(const Entity entity)
+    {
+    	return entity & ENTITY_MASK;
+    }
+
+	Generation World::get_egen(const Entity entity)
+    {
+    	return static_cast<Generation>(entity >> GENERATION_SHIFT);
+    }
+
+	Archetype *World::create_archetype(const std::vector<Component> &components)
+    {
+    	std::vector<Component> sorted_components = components;
+    	std::ranges::sort(sorted_components);
+
+    	const uint64_t hash = archash(sorted_components);
+    	if (const auto it = archetypes.find(hash);
+			it != archetypes.end())
+    		return it->second;
+
+    	auto *archetype = new Archetype();
+    	archetype->components = sorted_components;
+    	archetype->id = hash;
+
+    	for (Component comp_id: sorted_components)
+    	{
+    		Column column = {};
+    		column.size = component_sizes[comp_id];
+    		archetype->columns[comp_id] = column;
+    	}
+
+    	archetypes[hash] = archetype;
+    	return archetype;
+    }
+
+	Archetype *World::find_archetype_with(Archetype *source, const Component component)
+    {
+    	if (const auto edge_it = source->add_edge.find(component);
+			edge_it != source->add_edge.end() && edge_it->second->to != nullptr)
+    		return edge_it->second->to;
+
+    	if (source->has(component))
+    		return source;
+
+    	std::vector<Component> new_components = source->components;
+    	new_components.emplace_back(component);
+    	Archetype *target = find_archetype(new_components);
+    	if (!target)
+    		target = create_archetype(new_components);
+
+    	/* cache the edge for O(1) move */
+    	auto *edge = new GraphEdge();
+    	edge->from = source;
+    	edge->to = target;
+    	edge->id = component;
+
+    	source->add_edge[component] = edge;
+    	return target;
+    }
+
 	Archetype *World::find_archetype(const std::vector<Component> &components)
 	{
 		std::vector<Component> sorted_components = components;
