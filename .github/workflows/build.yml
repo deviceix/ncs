@@ -42,6 +42,7 @@ jobs:
                 -DCMAKE_CXX_FLAGS="-fdiagnostics-color=always"  \
                 -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
                 -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}     \
+                -DNCS_BUILD_BENCHES=OFF                         \
                 -S ${{ github.workspace }}
 
       - name: Build
