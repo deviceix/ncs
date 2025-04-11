@@ -26,12 +26,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # the project is depended on GoogleTest
+      # the project is depended on GoogleTest & GoogleBenchmark
       - name: Resolve Dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt update
-          sudo apt install -y ${{ matrix.c_compiler }} ${{ matrix.cpp_compiler }} libgtest-dev
+          sudo apt install -y ${{ matrix.c_compiler }} libgtest-dev libbenchmark-dev
 
       - name: Configure
         run: |
