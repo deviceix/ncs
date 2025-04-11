@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstring>
 #include <ncs/containers/archetype.hpp>
 
 namespace ncs
@@ -40,7 +41,7 @@ namespace ncs
 			const Entity last_entity = entities[last_row];
 			for (auto &[comp_id, column]: columns)
 			{
-				memcpy(
+				std::memcpy(
 					static_cast<char *>(column.data) + (row * column.size),
 					static_cast<char *>(column.data) + (last_row * column.size),
 					column.size
@@ -66,7 +67,7 @@ namespace ncs
 			{
 				const auto& c1 = columns[comp_id];
 				const auto& c2 = dest->columns[comp_id];
-				memcpy(static_cast<char *>(c2.data) + (dest_row * c1.size),
+				std::memcpy(static_cast<char *>(c2.data) + (dest_row * c1.size),
 					static_cast<char *>(c1.data) + row * c1.size, c1.size);
 			}
 		}
