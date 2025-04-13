@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstring>
-#include <typeindex>
 #include <unordered_map>
 #include <vector>
 #include <ncs/types.hpp>
@@ -46,28 +45,46 @@ namespace ncs
         static Generation get_egen(Entity e);
 
     private:
-        template<typename T>
-        Component get_cid()
-        {
-            /* use the type; replace typeid(T) with smth else that is faster ig */
-            for (const auto it = component_types.find(typeid(T));
-                        it != component_types.end();)
-            {
-                return it->second;
-            }
+    	/*
+    	 * this may seem unnerving at first, but it is valid. for every unique `T`
+    	 * the compiler will generate a separate instantiation of `type_hash<T>()`.
+    	 * each instantiation has its own unique static variable and each `id` has
+    	 * unique address, therefore this method will return the same address everytime
+    	 * when the template parameter is the same
+    	 *
+    	 * TLDR: this is not reproducible across runs so this may very well be changed
+    	 * when a better zero-cost solution comes around
+    	 *
+    	 */
+    	template<typename /* T */>
+		static constexpr uint64_t type_hash()
+    	{
+    		static char id = 0;
+    		return reinterpret_cast<uint64_t>(&id);
+    	}
 
-            const Component id = next_cid++;
-            component_types[typeid(T)] = id;
-			component_sizes[id] = sizeof(T);
-			if constexpr (!std::is_trivially_destructible_v<T>)
+    	template<typename T>
+	    Component get_cid()
+    	{
+			const uint64_t th = type_hash<T>();
+    		for (const auto it = component_types.find(th);
+    			it != component_types.end();)
 			{
-				cdtors[id] = [](void *ptr)
-				{
-					static_cast<T *>(ptr)->~T();
-				};
+				return it->second;
 			}
-			return id;
-        }
+
+    		const Component id = next_cid++;
+    		component_types[th] = id;
+    		component_sizes[id] = sizeof(T);
+    		if constexpr (!std::is_trivially_destructible_v<T>)
+    		{
+    			cdtors[id] = [](void *ptr)
+    			{
+    				static_cast<T *>(ptr)->~T();
+    			};
+    		}
+    		return id;
+    	}
 
     	template<typename T>
 		T *get_component_ptr(Archetype *archetype, const size_t row)
@@ -95,7 +112,7 @@ namespace ncs
         std::unordered_map<Entity, Generation> generations; /* a sparse set to track decoded entity's id */
 		/* maps entity ids to their index poses in the entity pools */
 		std::unordered_map<uint64_t, size_t> entity_indices;
-		std::unordered_map<std::type_index, Component> component_types; /* map component type to component id */
+		std::unordered_map<std::uint64_t, Component> component_types; /* map component type to component id */
 		std::unordered_map<Component, size_t> component_sizes;          /* stores size of each component type */
 
 		std::vector<Entity> entity_pool; /* available ids */
@@ -107,10 +124,10 @@ namespace ncs
     };
 
     template<typename T>
-	World *World::set(const Entity entity, const T &data)
+	World *World::set(const Entity e, const T &data)
 	{
-		const uint64_t entity_id = get_eid(entity);
-		const Generation gen = get_egen(entity);
+		const uint64_t entity_id = get_eid(e);
+		const Generation gen = get_egen(e);
 
 		/* if it is valid; TODO: wrap with debug macro */
 		if (const auto it = generations.find(entity_id);
@@ -215,10 +232,12 @@ namespace ncs
 	}
 
     template<typename T>
-	T *World::get(Entity entity)
+	T *World::get(const Entity e)
 	{
-		const uint64_t entity_id = get_eid(entity);
-		const Generation gen = get_egen(entity);
+		const uint64_t entity_id = get_eid(e);
+		const Generation gen = get_egen(e);
+
+    	/* if it is valid; TODO: wrap with debug macro */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
@@ -240,10 +259,12 @@ namespace ncs
 	}
 
 	template<typename T>
-	bool World::has(const Entity entity)
+	bool World::has(const Entity e)
 	{
-		const uint64_t entity_id = get_eid(entity);
-		const Generation gen = get_egen(entity);
+		const uint64_t entity_id = get_eid(e);
+		const Generation gen = get_egen(e);
+
+    	/* if it is valid; TODO: wrap with debug macro */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
@@ -260,10 +281,12 @@ namespace ncs
 	}
 
 	template<typename T>
-	World *World::remove(const Entity entity)
+	World *World::remove(const Entity e)
 	{
-		const uint64_t entity_id = get_eid(entity);
-		const Generation gen = get_egen(entity);
+		const uint64_t entity_id = get_eid(e);
+		const Generation gen = get_egen(e);
+
+    	/* if it is valid; TODO: wrap with debug macro */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
@@ -282,7 +305,7 @@ namespace ncs
 
 		if constexpr (!std::is_trivially_destructible_v<T>) /* destroy if not trivial type */
 		{
-			if (T *component_ptr = get<T>(entity))
+			if (T *component_ptr = get<T>(e))
 				component_ptr->~T();
 		}
 
