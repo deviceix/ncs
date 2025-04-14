@@ -39,6 +39,7 @@ if (NCS_BUILD_TESTS)
         tests/crud.cpp
         tests/lifecycle.cpp
         tests/query.cpp
+        tests/column.cpp
     )
 
     target_include_directories(${NCS_TEST} PRIVATE

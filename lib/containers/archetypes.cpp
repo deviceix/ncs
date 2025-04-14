@@ -41,17 +41,20 @@ namespace ncs
             const Entity last_entity = entities[last_row];
             for (auto &[comp_id, column]: columns)
             {
-                const void* src_ptr = column.get(last_row);
-                if (void* dst_ptr = column.get(row);
-                    src_ptr && dst_ptr)
+                // Check if both source and destination are constructed
+                if (column.is_constructed(last_row) && column.is_constructed(row))
                 {
                     if (column.has_copier())
                     {
+                        void* dst_ptr = column.get(row);
+                        const void* src_ptr = column.get(last_row);
                         column.get_copier()(dst_ptr, src_ptr);
                         column.destroy_at(last_row);
                     }
                     else /* trivially copyable */
                     {
+                        void* dst_ptr = column.get(row);
+                        const void* src_ptr = column.get(last_row);
                         std::memcpy(dst_ptr, src_ptr, column.size());
                     }
                 }
@@ -76,16 +79,22 @@ namespace ncs
             {
                 Column &src_col = columns[comp_id];
                 Column &dst_col = dest->columns[comp_id];
-
-                const void* src_ptr = src_col.get(row);
-                if (void* dst_ptr = dst_col.get(dest_row);
-                    src_ptr && dst_ptr)
+                if (src_col.is_constructed(row))
                 {
-                    /* non-trivial */
                     if (src_col.has_copier())
-                        src_col.get_copier()(dst_ptr, src_ptr);
+                    {
+                        void* dst_ptr = dst_col.get(dest_row);
+                        const void* src_ptr = src_col.get(row);
+                        if (dst_ptr && src_ptr)
+                            src_col.get_copier()(dst_ptr, src_ptr);
+                    }
                     else /* trivial */
-                        std::memcpy(dst_ptr, src_ptr, src_col.size());
+                    {
+                        void* dst_ptr = dst_col.get(dest_row);
+                        const void* src_ptr = src_col.get(row);
+                        if (dst_ptr && src_ptr)
+                            std::memcpy(dst_ptr, src_ptr, src_col.size());
+                    }
                 }
             }
         }

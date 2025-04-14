@@ -138,7 +138,7 @@ namespace ncs
 			const size_t row = dst->append(entity_id);
 
 			Column& column = dst->columns[component_id];
-			if (column.get(0) == nullptr)
+			if (!column.size())
 			{
 				column.load<T>();
 				column.resize(std::max(size_t{16}, dst->entities.size()));
@@ -146,7 +146,6 @@ namespace ncs
 
 			/* construct data */
 			column.construct_at<T>(row, data);
-
 			entity_records[entity_id] = { dst, row }; /* make a new record */
 		}
 		else /* path 2: entity exists in the archetype */
@@ -172,7 +171,7 @@ namespace ncs
 				Archetype* destination = find_archetype_with(current, component_id);
 
 				Column& column = destination->columns[component_id];
-				if (column.get(0) == nullptr) /* setup col if not */
+				if (!column.size())
 				{
 					column.load<T>();
 					column.resize(std::max(size_t{16}, destination->entities.size()));

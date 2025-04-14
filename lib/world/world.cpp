@@ -230,16 +230,17 @@ namespace ncs
             {
                 Column &src_col = source->columns[comp_id];
                 Column &dst_col = destination->columns[comp_id];
-
-                const void* src_ptr = src_col.get(src_row);
-                if (void* dst_ptr = dst_col.get(dest_row);
-                    src_ptr && dst_ptr)
+                if (src_col.is_constructed(src_row))
                 {
-                    /* non-trivial types */
-                    if (src_col.has_copier())
-                        src_col.get_copier()(dst_ptr, src_ptr);
-                    else /* trivial types */
-                        std::memcpy(dst_ptr, src_ptr, src_col.size());
+                    const void* src_ptr = src_col.get(src_row);
+                    if (void* dst_ptr = dst_col.get(dest_row);
+                        src_ptr && dst_ptr)
+                    {
+                        if (src_col.has_copier())
+                            src_col.get_copier()(dst_ptr, src_ptr);
+                        else /* trivial types */
+                            std::memcpy(dst_ptr, src_ptr, src_col.size());
+                    }
                 }
             }
         }
