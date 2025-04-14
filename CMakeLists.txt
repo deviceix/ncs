@@ -29,8 +29,8 @@ if (NCS_BUILD_TESTS)
     find_package(GTest REQUIRED)
 
     set(NCS_TEST ${PROJECT_NAME}-test)
-    set(SANITIZER_FLAGS 
-        "-fsanitize=address,undefined"
+    set(SANITIZER_FLAGS
+        "-fsanitize=address,leak,undefined"
         "-fno-omit-frame-pointer"
         "-fno-sanitize-recover=all"
     )

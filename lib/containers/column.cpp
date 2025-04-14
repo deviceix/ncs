@@ -116,7 +116,6 @@ namespace ncs
 	{
 		if (row >= capacity || !data)
 			return nullptr;
-
 		return static_cast<char *>(data) + (row * size);
 	}
 }

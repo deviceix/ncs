@@ -106,7 +106,7 @@ namespace ncs
 
         std::unordered_map<uint64_t, Archetype *> archetypes;
         std::unordered_map<Entity, Record> entity_records;
-        std::unordered_map<Component, void(*)(void *)> cdtors; 
+        std::unordered_map<Component, void(*)(void *)> cdtors;
         std::unordered_map<uint64_t, std::pair<void *, void(*)(void *)>> qcaches; /* type-erased query caches */
 
         std::unordered_map<Entity, Generation> generations; /* a sparse set to track decoded entity's id */
@@ -158,13 +158,9 @@ namespace ncs
 			/* copy data */
 			void *raw_ptr = static_cast<char *>(column.data) + (row * column.size);
 			if constexpr (std::is_trivially_copyable_v<T>)
-			{
 				std::memcpy(raw_ptr, &data, sizeof(T));
-			}
 			else
-			{
-				new(raw_ptr) T(data); /* non-trivial types */
-			}
+				std::construct_at(static_cast<T*>(raw_ptr), data);
 
 			entity_records[entity_id] = { dst, row }; /* make a new record */
 		}
@@ -190,8 +186,8 @@ namespace ncs
 				}
 				else
 				{
-					static_cast<T *>(raw_ptr)->~T();
-					new(raw_ptr) T(data);
+					std::destroy_at(static_cast<T*>(raw_ptr));
+					std::construct_at(static_cast<T*>(raw_ptr), data);
 				}
 
 				current->flags |= DirtyFlags::UPDATED;
