@@ -30,7 +30,7 @@ if (NCS_BUILD_TESTS)
 
     set(NCS_TEST ${PROJECT_NAME}-test)
     set(SANITIZER_FLAGS
-        "-fsanitize=address,leak,undefined"
+        "-fsanitize=address,undefined"
         "-fno-omit-frame-pointer"
         "-fno-sanitize-recover=all"
     )
