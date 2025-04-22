@@ -69,10 +69,14 @@ namespace ncs
 		const uint64_t entity_id = get_eid(entity);
 		const Generation gen = get_egen(entity);
 
+#ifndef NDEBUG
 		/* check if the entity exists with valid generation */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
+		{
 			return;
+		}
+#endif
 
 		/* remove all components */
 		if (const auto record_it = entity_records.find(entity_id);
