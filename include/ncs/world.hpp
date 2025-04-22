@@ -75,49 +75,55 @@ namespace ncs
     		const Component id = next_cid++;
     		component_types[th] = id;
     		component_sizes[id] = sizeof(T);
-
+    		if constexpr (!std::is_trivially_destructible_v<T>)
+    		{
+    			cdtors[id] = [](void *ptr)
+    			{
+    				static_cast<T *>(ptr)->~T();
+    			};
+    		}
     		return id;
     	}
 
     	template<typename T>
-		T* get_component_ptr(Archetype* archetype, const size_t row)
+		T *get_component_ptr(Archetype *archetype, const size_t row)
         {
         	const Component cid = get_cid<T>();
-        	const Column& column = archetype->columns.at(cid);
+        	const Column &column = archetype->columns.at(cid);
         	return column.get_as<T>(row);
         }
 
-        Archetype* create_archetype(const std::vector<Component>& components);
+        Archetype *create_archetype(const std::vector<Component> &components);
 
-		Archetype* find_archetype(const std::vector<Component>& components);
+		Archetype *find_archetype(const std::vector<Component> &components);
 
-		Archetype* find_archetype_with(Archetype* source, Component component);
+		Archetype *find_archetype_with(Archetype *source, Component component);
 
-		Archetype* find_archetype_without(Archetype* source, Component component);
+		Archetype *find_archetype_without(Archetype *source, Component component);
 
-		void move_entity(Entity entity, Record& record, Archetype* destination);
+		void move_entity(Entity entity, Record &record, Archetype *destination);
 
-        std::unordered_map<uint64_t, Archetype*> archetypes;
+        std::unordered_map<uint64_t, Archetype *> archetypes;
         std::unordered_map<Entity, Record> entity_records;
-        std::unordered_map<Component, void(*)(void*)> cdtors;
-        std::unordered_map<uint64_t, std::pair<void*, void(*)(void*)>> qcaches; /* type-erased query caches */
+        std::unordered_map<Component, void(*)(void *)> cdtors;
+        std::unordered_map<uint64_t, std::pair<void *, void(*)(void *)>> qcaches; /* type-erased query caches */
 
         std::unordered_map<Entity, Generation> generations; /* a sparse set to track decoded entity's id */
 		/* maps entity ids to their index poses in the entity pools */
 		std::unordered_map<uint64_t, size_t> entity_indices;
 		std::unordered_map<std::uint64_t, Component> component_types; /* map component type to component id */
-		std::unordered_map<Component, size_t> component_sizes;        /* stores size of each component type */
+		std::unordered_map<Component, size_t> component_sizes;          /* stores size of each component type */
 
 		std::vector<Entity> entity_pool; /* available ids */
 
-        Archetype* root_archetype = {}; /* */
+        Archetype *root_archetype = {}; /* */
         uint64_t alive_count;         /* the current number of alive & active entity */
 		uint64_t next_eid;            /* next entity id */
 		uint16_t next_cid;            /* next component id */
     };
 
     template<typename T>
-	World* World::set(const Entity e, const T& data)
+	World *World::set(const Entity e, const T &data)
 	{
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
@@ -134,52 +140,59 @@ namespace ncs
 			record_it == entity_records.end())
 		{
 			/* start checking from the root archetype; entity doesn't exist yet */
-			Archetype* dst = find_archetype_with(root_archetype, component_id);
+			Archetype *dst = find_archetype_with(root_archetype, component_id);
 			const size_t row = dst->append(entity_id);
 
-			Column& column = dst->columns[component_id];
-			if (!column.size())
+			Column &column = dst->columns[component_id];
+			if (column.size() == 0)
 			{
 				column.load<T>();
-				column.resize(std::max(size_t{16}, dst->entities.size()));
+				if (row >= column.capacity())
+					column.resize(std::max(size_t { 16 }, row + 1));
 			}
 
-			/* construct data */
+			if (row >= column.capacity())
+				column.resize(std::max(column.capacity() * 2, row + 1));
+
+			/* construct the data */
 			column.construct_at<T>(row, data);
+
 			entity_records[entity_id] = { dst, row }; /* make a new record */
 		}
 		else /* path 2: entity exists in the archetype */
 		{
-			Record& record = record_it->second;
-			Archetype* current = record.archetype;
-
-			if (current->has(component_id)) /* just update the data */
+			Record &record = record_it->second;
+			if (Archetype *current = record.archetype;
+				current->has(component_id)) /* just update the data */
 			{
-				Column& column = current->columns[component_id];
+				Column &column = current->columns[component_id];
 				const size_t row = record.row;
 
-				/* destroy existing instance if any */
-				column.destroy_at(row);
+				if (row >= column.capacity())
+					column.resize(std::max(column.capacity() * 2, row + 1));
 
-				/* construct new data */
+				/* destroy existing and construct new */
+				column.destroy_at(row);
 				column.construct_at<T>(row, data);
 
 				current->flags |= DirtyFlags::UPDATED;
 			}
 			else
 			{
-				Archetype* destination = find_archetype_with(current, component_id);
-
-				Column& column = destination->columns[component_id];
-				if (!column.size())
+				Archetype *destination = find_archetype_with(current, component_id);
+				Column &column = destination->columns[component_id];
+				if (column.size() == 0) /* setup col if not */
 				{
 					column.load<T>();
-					column.resize(std::max(size_t{16}, destination->entities.size()));
+					column.resize(std::max(size_t { 16 }, destination->entities.size()));
 				}
-
 				move_entity(entity_id, record, destination);
 
 				const size_t row = record.row;
+				if (row >= column.capacity())
+					column.resize(std::max(column.capacity() * 2, row + 1));
+
+				/* construct the component in the new archetype */
 				column.construct_at<T>(row, data);
 			}
 		}
@@ -188,7 +201,7 @@ namespace ncs
 	}
 
     template<typename T>
-	T* World::get(const Entity e)
+	T *World::get(const Entity e)
 	{
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
@@ -205,11 +218,13 @@ namespace ncs
 		if (it == entity_records.end())
 			return nullptr;
 
-		auto& [archetype, row] = it->second;
-		if (!archetype->has(component_id))
+		auto &[archetype, row] = it->second;
+		Archetype *arch = archetype;
+		if (!arch->has(component_id))
 			return nullptr;
 
-		return archetype->columns[component_id].get_as<T>(row);
+		const Column &column = arch->columns[component_id];
+		return column.get_as<T>(row);
 	}
 
 	template<typename T>
@@ -230,12 +245,12 @@ namespace ncs
 		if (it == entity_records.end())
 			return false;
 
-		Archetype* archetype = it->second.archetype;
+		Archetype *archetype = it->second.archetype;
 		return archetype->has(component_id);
 	}
 
 	template<typename T>
-	World* World::remove(const Entity e)
+	World *World::remove(const Entity e)
 	{
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
@@ -252,31 +267,33 @@ namespace ncs
 		if (it == entity_records.end())
 			return this;
 
-		Record& record = it->second;
-		Archetype* current = record.archetype;
+		Record &record = it->second;
+		Archetype *current = record.archetype;
 		if (!current->has(component_id))
 			return this;
 
-		/* destroy component instance */
-		Column& column = current->columns[component_id];
-		column.destroy_at(record.row);
+		/* destroy the component if it's constructed */
+		Column &column = current->columns[component_id];
+		if (column.is_constructed(record.row))
+			column.destroy_at(record.row);
 
-		Archetype* dst = find_archetype_without(current, component_id);
+		Archetype *dst = find_archetype_without(current, component_id);
 		move_entity(entity_id, record, dst);
 		return this;
 	}
 
     template<typename... Components>
-	std::vector<std::tuple<Entity, Components*...>> World::query()
+	std::vector<std::tuple<Entity, Components *...> > World::query()
 	{
 		const std::vector<Component> cids = { get_cid<Components>()... };
 		const uint64_t qhash = archash(cids);
 
-		const auto cache_it = qcaches.find(qhash);
-		QueryCache<Components...>* cache = nullptr;
+		auto cache_it = qcaches.find(qhash);
+		QueryCache<Components...> *cache = nullptr;
+
 		if (cache_it != qcaches.end())
 		{
-			cache = static_cast<QueryCache<Components...>*>(cache_it->second.first);
+			cache = static_cast<QueryCache<Components...> *>(cache_it->second.first);
 			if (cache->archetype && cache->entity_count == cache->archetype->entity_count &&
 			    !has_flag(cache->archetype->flags, DirtyFlags::ADDED | DirtyFlags::REMOVED | DirtyFlags::UPDATED))
 			{
@@ -314,10 +331,10 @@ namespace ncs
 				    !has_flag(cache->archetype->flags, DirtyFlags::ADDED | DirtyFlags::UPDATED))
 				{
 					/* filter out non-existent entities; entities were removed */
-					auto& result = cache->result;
+					auto &result = cache->result;
 					result.erase(
 						std::remove_if(result.begin(), result.end(),
-						               [this, cache](const auto& tuple)
+						               [this, cache](const auto &tuple)
 						               {
 							               Entity encoded_entity = std::get<0>(tuple);
 							               uint64_t entity_id = get_eid(encoded_entity);
@@ -347,18 +364,18 @@ namespace ncs
 			cache = new QueryCache<Components...>();
 			qcaches[qhash] = {
 				cache,
-				[](void* ptr)
+				[](void *ptr)
 				{
-					delete static_cast<QueryCache<Components...>*>(ptr);
+					delete static_cast<QueryCache<Components...> *>(ptr);
 				}
 			};
 		}
 
 		/* clear existing results if this is a cache rebuild */
-		std::vector<std::tuple<Entity, Components*...>>().swap(cache->result);
+		std::vector<std::tuple<Entity, Components *...>>().swap(cache->result);
 
 		/* populate the query */
-		for (const auto& [hash, arch]: archetypes)
+		for (const auto &[hash, arch]: archetypes)
 		{
 			auto valid = true;
 			for (const Component cid: cids)

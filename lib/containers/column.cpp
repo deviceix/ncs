@@ -50,6 +50,8 @@ namespace ncs
                 std::memcpy(ptr, other.ptr, other.cap * sz);
             }
         }
+
+        resize(16);
     }
 
     Column::Column(Column &&other) noexcept :
@@ -135,7 +137,6 @@ namespace ncs
         if (!new_ptr)
             throw std::bad_alloc();
 
-        /* Copy data first, then update ptr, then clean up old memory */
         if (ptr && cap > 0)
         {
             if (copier)
@@ -156,8 +157,7 @@ namespace ncs
             }
 
             void* old_ptr = ptr;
-            ptr = new_ptr;  /* Update ptr before destroying objects */
-
+            ptr = new_ptr;
             if (dtor)
             {
                 for (size_t i = 0; i < cap && i < constructed.size(); ++i)
@@ -208,7 +208,7 @@ namespace ncs
 
     void* Column::get(const std::size_t row) const
     {
-        if (row >= cap || !ptr || (row < constructed.size() && !constructed[row]))
+        if (row >= cap || !ptr)
             return nullptr;
         return static_cast<char*>(ptr) + (row * sz);
     }
@@ -221,6 +221,20 @@ namespace ncs
             dtor(p);
             constructed[row] = false;
         }
+    }
+
+    void Column::load_raw(const std::size_t element_size, DestructorFn destructor, const CopierFn cp)
+    {
+        sz = element_size;
+        dtor = destructor;
+        copier = cp;
+        constructed = std::vector(cap, false);
+    }
+
+    void Column::mark_constructed(const std::size_t row, const bool value)
+    {
+        if (row < constructed.size())
+            constructed[row] = value;
     }
 
     std::size_t Column::capacity() const

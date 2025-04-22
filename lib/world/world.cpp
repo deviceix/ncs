@@ -5,250 +5,272 @@
 namespace ncs
 {
     constexpr std::uint64_t ENTITY_MASK = 0x0000FFFFFFFFFFFF; /* 48 lower bits for entity id */
-    constexpr std::uint64_t GENERATION_SHIFT = 48; /* we need to shift 16 bits upper to accommodate the entity bits */
-    constexpr Generation MAX_GENERATION = 0xFFFF; /* for 16-bit generation */
+	constexpr std::uint64_t GENERATION_SHIFT = 48; /* we need to shift 16 bits upper to accommodate the entity bits */
+	constexpr Generation MAX_GENERATION = 0xFFFF; /* for 16-bit generation */
 
     World::World() : root_archetype(create_archetype({})), alive_count(0), next_eid(0), next_cid(0) {}
 
-    World::~World()
-    {
-        for (auto& [hash, cache_entry] : qcaches)
-        {
-            auto& [ptr, del] = cache_entry;
-            del(ptr);
-        }
-        qcaches.clear();
+	World::~World()
+	{
+		for (auto& [hash, cache_entry] : qcaches)
+		{
+			auto& [ptr, del] = cache_entry;
+			del(ptr);
+		}
+		qcaches.clear();
 
-        for (auto& [hash, archetype] : archetypes)
-        {
-            for (auto& [c, edge] : archetype->add_edge)
-                delete edge;
-            for (auto& [c, edge] : archetype->remove_edge)
-                delete edge;
+		for (auto& [hash, archetype] : archetypes)
+		{
+			for (auto& [c, edge] : archetype->add_edge)
+				delete edge;
+			for (auto& [c, edge] : archetype->remove_edge)
+				delete edge;
 
-            delete archetype;
-        }
-        archetypes.clear();
-    }
+			delete archetype;
+		}
+		archetypes.clear();
+	}
 
     Entity World::entity()
     {
         Entity entity;
-        Generation gen;
+		Generation gen;
 
-        if (alive_count < entity_pool.size())
-        {
-            /* recycling */
-            entity = entity_pool[alive_count]; /* get the entity id to recycle */
+		if (alive_count < entity_pool.size())
+		{
+			/* recycling */
+			entity = entity_pool[alive_count]; /* get the entity id to recycle */
 
-            const auto it = generations.find(entity);
-            gen = (it != generations.end() ? it->second : 0) + 1;
+			const auto it = generations.find(entity);
+			gen = (it != generations.end() ? it->second : 0) + 1;
 
-            /* wrap around if generation is overflow */
-            gen = gen > MAX_GENERATION /* 16-bit */ ? 0 : gen;
-        }
-        else
-        {
-            /* newborn path */
-            entity = next_eid;
-            ++next_eid;
-            gen = 0;
+			/* wrap around if generation is overflow */
+			gen = gen > MAX_GENERATION /* 16-bit */ ? 0 : gen;
+		}
+		else
+		{
+			/* newborn path */
+			entity = next_eid;
+			++next_eid;
+			gen = 0;
 
-            /* add to the pool */
-            entity_pool.emplace_back(entity);
-        }
+			/* add to the pool */
+			entity_pool.emplace_back(entity);
+		}
 
-        ++alive_count;
-        generations[entity] = gen;
-        entity_indices[entity] = alive_count - 1; /* store entity's position in the pool */
-        return encode_entity(entity, gen);
+		++alive_count;
+		generations[entity] = gen;
+		entity_indices[entity] = alive_count - 1; /* store entity's position in the pool */
+		return encode_entity(entity, gen);
     }
 
     void World::despawn(const Entity entity)
+	{
+		const uint64_t entity_id = get_eid(entity);
+		const Generation gen = get_egen(entity);
+
+		/* check if the entity exists with valid generation */
+		if (const auto it = generations.find(entity_id);
+			it == generations.end() || it->second != gen)
+			return;
+
+		/* remove all components */
+		if (const auto record_it = entity_records.find(entity_id);
+			record_it != entity_records.end())
+		{
+			Record &record = record_it->second;
+			Archetype *archetype = record.archetype;
+			const size_t row = record.row;
+
+			/* first call destructors for non-trivial components */
+			for (Component comp_id: archetype->components)
+			{
+				if (Column &column = archetype->columns[comp_id];
+					column.has_dtor() && column.is_constructed(row))
+				{
+					column.destroy_at(row);
+				}
+			}
+
+			archetype->remove(entity_id) ;/* remove the archetype; note that this cleans up the memory as well */
+			entity_records.erase(entity_id); /* clear the record */
+		}
+
+		const auto idx_it = entity_indices.find(entity_id);
+		if (idx_it == entity_indices.end())
+			return;
+
+		if (const size_t index = idx_it->second;
+			index < alive_count - 1)
+		{
+			entity_pool[index] = entity_pool[alive_count - 1];
+			entity_indices[entity_pool[index]] = index;
+		}
+
+		entity_pool[alive_count - 1] = entity_id;
+		--alive_count;
+
+		/* update generation for reuse */
+		generations[entity_id] = (generations[entity_id] + 1) > MAX_GENERATION ? 0 : generations[entity_id] + 1;
+		entity_indices.erase(entity_id); /* clean up entity index */
+	}
+
+	Entity World::encode_entity(const uint64_t id, const Generation gen)
     {
-        const uint64_t entity_id = get_eid(entity);
-        const Generation gen = get_egen(entity);
-
-        /* check if the entity exists with valid generation */
-        if (const auto it = generations.find(entity_id);
-            it == generations.end() || it->second != gen)
-            return;
-
-        /* remove all components */
-        if (const auto record_it = entity_records.find(entity_id);
-            record_it != entity_records.end())
-        {
-            Record &record = record_it->second;
-            Archetype *archetype = record.archetype;
-            const size_t row = record.row;
-
-            /* destroy component instances at the row */
-            for (Component comp_id: archetype->components)
-            {
-                Column &column = archetype->columns[comp_id];
-                column.destroy_at(row);
-            }
-
-            archetype->remove(entity_id);
-            entity_records.erase(entity_id);
-        }
-
-        const auto idx_it = entity_indices.find(entity_id);
-        if (idx_it == entity_indices.end())
-            return;
-
-        if (const size_t index = idx_it->second;
-            index < alive_count - 1)
-        {
-            entity_pool[index] = entity_pool[alive_count - 1];
-            entity_indices[entity_pool[index]] = index;
-        }
-
-        entity_pool[alive_count - 1] = entity_id;
-        --alive_count;
-
-        /* update generation for reuse */
-        generations[entity_id] = (generations[entity_id] + 1) > MAX_GENERATION ? 0 : generations[entity_id] + 1;
-        entity_indices.erase(entity_id);
+    	return (static_cast<Entity>(gen) << GENERATION_SHIFT) | (id & ENTITY_MASK);
     }
 
-    Entity World::encode_entity(const uint64_t id, const Generation gen)
+	uint64_t World::get_eid(const Entity entity)
     {
-        return (static_cast<Entity>(gen) << GENERATION_SHIFT) | (id & ENTITY_MASK);
+    	return entity & ENTITY_MASK;
     }
 
-    uint64_t World::get_eid(const Entity entity)
+	Generation World::get_egen(const Entity entity)
     {
-        return entity & ENTITY_MASK;
+    	return static_cast<Generation>(entity >> GENERATION_SHIFT);
     }
 
-    Generation World::get_egen(const Entity entity)
+	Archetype *World::create_archetype(const std::vector<Component> &components)
     {
-        return static_cast<Generation>(entity >> GENERATION_SHIFT);
+    	std::vector<Component> sorted_components = components;
+    	std::ranges::sort(sorted_components);
+
+    	const uint64_t hash = archash(sorted_components);
+    	if (const auto it = archetypes.find(hash);
+			it != archetypes.end())
+    		return it->second;
+
+    	auto *archetype = new Archetype();
+    	archetype->components = sorted_components;
+    	archetype->id = hash;
+
+    	for (Component comp_id: sorted_components)
+    	{
+    		Column column;
+    		column.load_raw(component_sizes[comp_id],
+				   cdtors.contains(comp_id) ? cdtors[comp_id] : nullptr,
+				   nullptr);
+    		column.resize(16);
+    		archetype->columns[comp_id] = column;
+    	}
+
+    	archetypes[hash] = archetype;
+    	return archetype;
     }
 
-    Archetype *World::create_archetype(const std::vector<Component> &components)
+	Archetype *World::find_archetype_with(Archetype *source, const Component component)
     {
-        std::vector<Component> sorted_components = components;
-        std::ranges::sort(sorted_components);
+    	if (const auto edge_it = source->add_edge.find(component);
+			edge_it != source->add_edge.end() && edge_it->second->to != nullptr)
+    		return edge_it->second->to;
 
-        const uint64_t hash = archash(sorted_components);
-        if (const auto it = archetypes.find(hash);
-            it != archetypes.end())
-            return it->second;
+    	if (source->has(component))
+    		return source;
 
-        auto *archetype = new Archetype();
-        archetype->components = sorted_components;
-        archetype->id = hash;
+    	std::vector<Component> new_components = source->components;
+    	new_components.emplace_back(component);
+    	Archetype *target = find_archetype(new_components);
+    	if (!target)
+    		target = create_archetype(new_components);
 
-        archetypes[hash] = archetype;
-        return archetype;
+    	/* cache the edge for O(1) move */
+    	auto *edge = new GraphEdge();
+    	edge->from = source;
+    	edge->to = target;
+    	edge->id = component;
+
+    	source->add_edge[component] = edge;
+    	return target;
     }
 
-    Archetype *World::find_archetype_with(Archetype *source, const Component component)
+	Archetype *World::find_archetype(const std::vector<Component> &components)
+	{
+		std::vector<Component> sorted_components = components;
+		std::ranges::sort(sorted_components);
+
+		const uint64_t hash = archash(sorted_components);
+		if (const auto it = archetypes.find(hash);
+			it != archetypes.end())
+			return it->second;
+
+		return nullptr;
+	}
+
+	Archetype *World::find_archetype_without(Archetype *source, const Component component)
+	{
+		if (const auto edge_it = source->remove_edge.find(component);
+			edge_it != source->remove_edge.end() && edge_it->second->to != nullptr)
+			return edge_it->second->to;
+
+		if (!source->has(component))
+			return source;
+
+		/* create new component list */
+		std::vector<Component> new_components;
+		new_components.reserve(source->components.size() - 1);
+		for (Component c: source->components)
+		{
+			if (c != component)
+				new_components.emplace_back(c);
+		}
+
+		Archetype *target = find_archetype(new_components);
+		if (!target)
+			target = create_archetype(new_components);
+
+		/* cache the edge for future use*/
+		auto *edge = new GraphEdge();
+		edge->from = source;
+		edge->to = target;
+		edge->id = component;
+
+		source->remove_edge[component] = edge;
+		return target;
+	}
+
+	void World::move_entity(const Entity entity, Record &record, Archetype *destination)
     {
-        if (const auto edge_it = source->add_edge.find(component);
-            edge_it != source->add_edge.end() && edge_it->second->to != nullptr)
-            return edge_it->second->to;
+    	const uint64_t entity_id = get_eid(entity);
+    	Archetype *source = record.archetype;
+    	if (source == destination)
+    		return;
 
-        if (source->has(component))
-            return source;
+    	const size_t src_row = record.row;
+    	const size_t dest_row = destination->append(entity_id);
+    	for (Component comp: source->components)
+    	{
+    		if (destination->has(comp))
+    		{
+    			const Column &src_col = source->columns[comp];
+    			Column &dst_col = destination->columns[comp];
 
-        std::vector<Component> new_components = source->components;
-        new_components.emplace_back(component);
-        Archetype *target = find_archetype(new_components);
-        if (!target)
-            target = create_archetype(new_components);
+    			if (src_col.is_constructed(src_row))
+    			{
+    				const void* src_ptr = src_col.get(src_row);
+    				void* dst_ptr = dst_col.get(dest_row);
 
-        /* cache the edge for O(1) move */
-        auto *edge = new GraphEdge();
-        edge->from = source;
-        edge->to = target;
-        edge->id = component;
+    				if (!src_ptr || !dst_ptr)
+    					continue;
 
-        source->add_edge[component] = edge;
-        return target;
-    }
+    				dst_col.destroy_at(dest_row);
+    				if (src_col.has_copier()) /* non-trivial */
+    				{
+    					const CopierFn copier = src_col.get_copier();
+    					copier(dst_ptr, src_ptr);
+    				}
+    				else /* trivial */
+    				{
+    					std::memcpy(dst_ptr, src_ptr, src_col.size());
+    				}
+    				dst_col.mark_constructed(dest_row);
+    			}
+    		}
+    	}
 
-    Archetype *World::find_archetype(const std::vector<Component> &components)
-    {
-        std::vector<Component> sorted_components = components;
-        std::ranges::sort(sorted_components);
-
-        const uint64_t hash = archash(sorted_components);
-        if (const auto it = archetypes.find(hash);
-            it != archetypes.end())
-            return it->second;
-
-        return nullptr;
-    }
-
-    Archetype *World::find_archetype_without(Archetype *source, const Component component)
-    {
-        if (const auto edge_it = source->remove_edge.find(component);
-            edge_it != source->remove_edge.end() && edge_it->second->to != nullptr)
-            return edge_it->second->to;
-
-        if (!source->has(component))
-            return source;
-
-        /* create new component list */
-        std::vector<Component> new_components;
-        new_components.reserve(source->components.size() - 1);
-        for (Component c: source->components)
-        {
-            if (c != component)
-                new_components.emplace_back(c);
-        }
-
-        Archetype *target = find_archetype(new_components);
-        if (!target)
-            target = create_archetype(new_components);
-
-        /* cache the edge for future use*/
-        auto *edge = new GraphEdge();
-        edge->from = source;
-        edge->to = target;
-        edge->id = component;
-
-        source->remove_edge[component] = edge;
-        return target;
-    }
-
-    void World::move_entity(const Entity entity, Record &record, Archetype *destination)
-    {
-        const uint64_t entity_id = get_eid(entity);
-        Archetype *source = record.archetype;
-        if (source == destination)
-            return;
-
-        const size_t src_row = record.row;
-        const size_t dest_row = destination->append(entity_id);
-        for (Component comp_id: source->components)
-        {
-            if (destination->has(comp_id))
-            {
-                Column &src_col = source->columns[comp_id];
-                Column &dst_col = destination->columns[comp_id];
-                if (src_col.is_constructed(src_row))
-                {
-                    const void* src_ptr = src_col.get(src_row);
-                    if (void* dst_ptr = dst_col.get(dest_row);
-                        src_ptr && dst_ptr)
-                    {
-                        if (src_col.has_copier())
-                            src_col.get_copier()(dst_ptr, src_ptr);
-                        else /* trivial types */
-                            std::memcpy(dst_ptr, src_ptr, src_col.size());
-                    }
-                }
-            }
-        }
-
-        /* patch */
-        source->remove(entity_id);
-        record.archetype = destination;
-        record.row = dest_row;
-        entity_records[entity_id] = record;
+    	/* patch */
+    	source->remove(entity_id);
+    	record.archetype = destination;
+    	record.row = dest_row;
+    	entity_records[entity_id] = record;
     }
 }

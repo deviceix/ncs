@@ -77,6 +77,10 @@ namespace ncs
 
         void destroy_at(std::size_t row);
 
+        void load_raw(std::size_t element_size, DestructorFn destructor, CopierFn cp);
+
+        void mark_constructed(std::size_t row, bool value = true);
+
         [[nodiscard]]
         void* get(std::size_t row) const;
 
