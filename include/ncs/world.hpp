@@ -9,91 +9,94 @@
 
 namespace ncs
 {
-    class World
-    {
-    public:
-        World();
+	class World
+	{
+	public:
+		World();
 
-        ~World();
+		~World();
 
-        [[nodiscard("ncs::Entity should not be discarded")]]
-        Entity entity();
+		[[nodiscard("ncs::Entity should not be discarded")]]
+		Entity entity();
 
-        void despawn(Entity e);
+		void despawn(Entity e);
 
-        template<typename T>
-        World* set(Entity e, const T& data);
+		template<typename T>
+		World *set(Entity e, const T &data);
 
-        template<typename T>
-        bool has(Entity e);
+		template<class T>
+		World *set(Entity e, T &&data);
 
-        template<typename T>
-        T* get(Entity e);
+		template<typename T>
+		bool has(Entity e);
 
-        template<typename T>
-        World* remove(Entity e);
+		template<typename T>
+		T *get(Entity e);
 
-        template<typename... Components>
-        std::vector<std::tuple<Entity, Components*...>> query();
+		template<typename T>
+		World *remove(Entity e);
 
-        /* utils */
-        static Entity encode_entity(std::uint64_t eid, Generation egen);
+		template<typename... Components>
+		std::vector<std::tuple<Entity, Components *...> > query();
 
-        static std::uint64_t get_eid(Entity e);
+		/* utils */
+		static Entity encode_entity(std::uint64_t eid, Generation egen);
 
-        static Generation get_egen(Entity e);
+		static std::uint64_t get_eid(Entity e);
 
-    private:
-    	/*
-    	 * this may seem unnerving at first, but it is valid. for every unique `T`
-    	 * the compiler will generate a separate instantiation of `type_hash<T>()`.
-    	 * each instantiation has its own unique static variable and each `id` has
-    	 * unique address, therefore this method will return the same address everytime
-    	 * when the template parameter is the same
-    	 *
-    	 * TLDR: this is not reproducible across runs so this may very well be changed
-    	 * when a better zero-cost solution comes around
-    	 *
-    	 */
-    	template<typename /* T */>
+		static Generation get_egen(Entity e);
+
+	private:
+		/*
+		 * this may seem unnerving at first, but it is valid. for every unique `T`
+		 * the compiler will generate a separate instantiation of `type_hash<T>()`.
+		 * each instantiation has its own unique static variable and each `id` has
+		 * unique address, therefore this method will return the same address everytime
+		 * when the template parameter is the same
+		 *
+		 * TLDR: this is not reproducible across runs so this may very well be changed
+		 * when a better zero-cost solution comes around
+		 *
+		 */
+		template<typename /* T */>
 		static constexpr uint64_t type_hash()
-    	{
-    		static char id = 0;
-    		return reinterpret_cast<uint64_t>(&id);
-    	}
+		{
+			static char id = 0;
+			return reinterpret_cast<uint64_t>(&id);
+		}
 
-    	template<typename T>
-	    Component get_cid()
-    	{
+		template<typename T>
+		Component get_cid()
+		{
 			const uint64_t th = type_hash<T>();
-    		for (const auto it = component_types.find(th);
-    			it != component_types.end();)
+			for (const auto it = component_types.find(th);
+			     it != component_types.end();)
 			{
 				return it->second;
 			}
 
-    		const Component id = next_cid++;
-    		component_types[th] = id;
-    		component_sizes[id] = sizeof(T);
-    		if constexpr (!std::is_trivially_destructible_v<T>)
-    		{
-    			cdtors[id] = [](void *ptr)
-    			{
-    				static_cast<T *>(ptr)->~T();
-    			};
-    		}
-    		return id;
-    	}
+			const Component id = next_cid++;
+			component_types[th] = id;
+			component_sizes[id] = sizeof(T);
+			if constexpr (!std::is_trivially_destructible_v<T>)
+			{
+				cdtors[id] = [](void *ptr)
+				{
+					static_cast<T *>(ptr)->~T();
+				};
+			}
+			return id;
+		}
 
-    	template<typename T>
+		template<typename T>
 		T *get_component_ptr(Archetype *archetype, const size_t row)
-        {
-        	const Component cid = get_cid<T>();
-        	const Column &column = archetype->columns.at(cid);
-        	return column.get_as<T>(row);
-        }
+		{
+			const Component cid = get_cid<T>();
+			const Column &column = archetype->columns.at(cid);
+			return column.get_as<T>(row);
+		}
 
-        Archetype *create_archetype(const std::vector<Component> &components);
+		Archetype *create_archetype(const std::vector<Component> &components);
 
 		Archetype *find_archetype(const std::vector<Component> &components);
 
@@ -103,37 +106,39 @@ namespace ncs
 
 		void move_entity(Entity entity, Record &record, Archetype *destination);
 
-        std::unordered_map<uint64_t, Archetype *> archetypes;
-        std::unordered_map<Entity, Record> entity_records;
-        std::unordered_map<Component, void(*)(void *)> cdtors;
-        std::unordered_map<uint64_t, std::pair<void *, void(*)(void *)>> qcaches; /* type-erased query caches */
+		std::unordered_map<uint64_t, Archetype *> archetypes;
+		std::unordered_map<Entity, Record> entity_records;
+		std::unordered_map<Component, void(*)(void *)> cdtors;
+		std::unordered_map<uint64_t, std::pair<void *, void(*)(void *)> > qcaches; /* type-erased query caches */
 
-        std::unordered_map<Entity, Generation> generations; /* a sparse set to track decoded entity's id */
+		std::unordered_map<Entity, Generation> generations; /* a sparse set to track decoded entity's id */
 		/* maps entity ids to their index poses in the entity pools */
 		std::unordered_map<uint64_t, size_t> entity_indices;
 		std::unordered_map<std::uint64_t, Component> component_types; /* map component type to component id */
-		std::unordered_map<Component, size_t> component_sizes;          /* stores size of each component type */
+		std::unordered_map<Component, size_t> component_sizes;        /* stores size of each component type */
 
 		std::vector<Entity> entity_pool; /* available ids */
 
-        Archetype *root_archetype = {}; /* */
-        uint64_t alive_count;         /* the current number of alive & active entity */
-		uint64_t next_eid;            /* next entity id */
-		uint16_t next_cid;            /* next component id */
-    };
+		Archetype *root_archetype = {}; /* */
+		uint64_t alive_count;           /* the current number of alive & active entity */
+		uint64_t next_eid;              /* next entity id */
+		uint16_t next_cid;              /* next component id */
+	};
 
-    template<typename T>
+	template<typename T>
 	World *World::set(const Entity e, const T &data)
 	{
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
 
-		/* if it is valid; TODO: wrap with debug macro */
+#ifndef NDEBUG
+		/* if it is valid; */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
 			return this;
 		}
+#endif
 
 		const Component component_id = get_cid<T>();
 		if (const auto record_it = entity_records.find(entity_id); /* check if entity exists in any archetype */
@@ -200,18 +205,100 @@ namespace ncs
 		return this;
 	}
 
-    template<typename T>
+	template<typename T>
+	World *World::set(Entity e, T &&data)
+	{
+		const uint64_t entity_id = get_eid(e);
+		const Generation gen = get_egen(e);
+
+#ifndef NDEBUG
+		/* if it is valid; */
+		if (const auto it = generations.find(entity_id);
+			it == generations.end() || it->second != gen)
+		{
+			return this;
+		}
+#endif
+
+		const Component component_id = get_cid<T>();
+		if (const auto record_it = entity_records.find(entity_id); /* check if entity exists in any archetype */
+			record_it == entity_records.end())
+		{
+			/* start checking from the root archetype; entity doesn't exist yet */
+			Archetype *dst = find_archetype_with(root_archetype, component_id);
+			const size_t row = dst->append(entity_id);
+
+			Column &column = dst->columns[component_id];
+			if (column.size() == 0)
+			{
+				column.load<std::remove_reference_t<T> >();
+				if (row >= column.capacity())
+					column.resize(std::max(size_t { 16 }, row + 1));
+			}
+
+			if (row >= column.capacity())
+				column.resize(std::max(column.capacity() * 2, row + 1));
+
+			/* construct the data with perfect forwarding */
+			column.construct_at<std::remove_reference_t<T> >(row, std::forward<T>(data));
+
+			entity_records[entity_id] = { dst, row }; /* make a new record */
+		}
+		else /* path 2: entity exists in the archetype */
+		{
+			Record &record = record_it->second;
+			if (Archetype *current = record.archetype;
+				current->has(component_id)) /* just update the data */
+			{
+				Column &column = current->columns[component_id];
+				const size_t row = record.row;
+
+				if (row >= column.capacity())
+					column.resize(std::max(column.capacity() * 2, row + 1));
+
+				/* destroy existing and construct new with perfect forwarding */
+				column.destroy_at(row);
+				column.construct_at<std::remove_reference_t<T> >(row, std::forward<T>(data));
+
+				current->flags |= DirtyFlags::UPDATED;
+			}
+			else
+			{
+				Archetype *destination = find_archetype_with(current, component_id);
+				Column &column = destination->columns[component_id];
+				if (column.size() == 0) /* setup col if not */
+				{
+					column.load<std::remove_reference_t<T> >();
+					column.resize(std::max(size_t { 16 }, destination->entities.size()));
+				}
+				move_entity(entity_id, record, destination);
+
+				const size_t row = record.row;
+				if (row >= column.capacity())
+					column.resize(std::max(column.capacity() * 2, row + 1));
+
+				/* construct the component in the new archetype with perfect forwarding */
+				column.construct_at<std::remove_reference_t<T> >(row, std::forward<T>(data));
+			}
+		}
+
+		return this;
+	}
+
+	template<typename T>
 	T *World::get(const Entity e)
 	{
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
 
-    	/* if it is valid; TODO: wrap with debug macro */
+#ifndef NDEBUG
+		/* if it is valid; */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
 			return nullptr;
 		}
+#endif
 
 		const Component component_id = get_cid<T>();
 		const auto it = entity_records.find(entity_id);
@@ -233,19 +320,21 @@ namespace ncs
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
 
-    	/* if it is valid; TODO: wrap with debug macro */
+#ifndef NDEBUG
+		/* if it is valid; */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
 			return false;
 		}
+#endif
 
 		const Component component_id = get_cid<T>();
 		const auto it = entity_records.find(entity_id);
 		if (it == entity_records.end())
 			return false;
 
-		Archetype *archetype = it->second.archetype;
+		const Archetype *archetype = it->second.archetype;
 		return archetype->has(component_id);
 	}
 
@@ -255,12 +344,14 @@ namespace ncs
 		const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
 
-    	/* if it is valid; TODO: wrap with debug macro */
+#ifndef NDEBUG
+		/* if it is valid; */
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
 			return this;
 		}
+#endif
 
 		const Component component_id = get_cid<T>();
 		const auto it = entity_records.find(entity_id);
@@ -282,7 +373,7 @@ namespace ncs
 		return this;
 	}
 
-    template<typename... Components>
+	template<typename... Components>
 	std::vector<std::tuple<Entity, Components *...> > World::query()
 	{
 		const std::vector<Component> cids = { get_cid<Components>()... };
@@ -372,7 +463,7 @@ namespace ncs
 		}
 
 		/* clear existing results if this is a cache rebuild */
-		std::vector<std::tuple<Entity, Components *...>>().swap(cache->result);
+		std::vector<std::tuple<Entity, Components *...> >().swap(cache->result);
 
 		/* populate the query */
 		for (const auto &[hash, arch]: archetypes)
