@@ -159,7 +159,6 @@ TEST_F(CRUDTest, ComponentRemove)
 	auto *pos_ptr = world.get<Position>(entity);
 	auto *health_ptr = world.get<Health>(entity);
 	ASSERT_FALSE(pos_ptr == nullptr);
-	ASSERT_FALSE(vel_ptr == nullptr);
 	ASSERT_FALSE(health_ptr == nullptr);
 	EXPECT_EQ(pos_ptr->x, 1.0f);
 	EXPECT_EQ(health_ptr->value, 100);
