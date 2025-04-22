@@ -7,7 +7,7 @@
 
 namespace ncs
 {
-	struct Column;
+	class Column;
 	struct Archetype;
 	struct GraphEdge;
 	struct Record;

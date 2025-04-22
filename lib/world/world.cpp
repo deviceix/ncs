@@ -85,12 +85,10 @@ namespace ncs
 			/* first call destructors for non-trivial components */
 			for (Component comp_id: archetype->components)
 			{
-				if (auto destructor_it = cdtors.find(comp_id);
-					destructor_it != cdtors.end())
+				if (Column &column = archetype->columns[comp_id];
+					column.has_dtor() && column.is_constructed(row))
 				{
-					const Column &column = archetype->columns[comp_id];
-					void *component_ptr = static_cast<char *>(column.data) + (row * column.size);
-					destructor_it->second(component_ptr); /* call ~T() */
+					column.destroy_at(row);
 				}
 			}
 
@@ -148,8 +146,11 @@ namespace ncs
 
     	for (Component comp_id: sorted_components)
     	{
-    		Column column = {};
-    		column.size = component_sizes[comp_id];
+    		Column column;
+    		column.load_raw(component_sizes[comp_id],
+				   cdtors.contains(comp_id) ? cdtors[comp_id] : nullptr,
+				   nullptr);
+    		column.resize(16);
     		archetype->columns[comp_id] = column;
     	}
 
@@ -228,33 +229,48 @@ namespace ncs
 	}
 
 	void World::move_entity(const Entity entity, Record &record, Archetype *destination)
-	{
-		const uint64_t entity_id = get_eid(entity);
-		Archetype *source = record.archetype;
-		if (source == destination)
-			return;
+    {
+    	const uint64_t entity_id = get_eid(entity);
+    	Archetype *source = record.archetype;
+    	if (source == destination)
+    		return;
 
-		const size_t src_row = record.row;
-		const size_t dest_row = destination->append(entity_id);
-		for (Component comp: source->components)
-		{
-			if (destination->has(comp))
-			{
-				const Column &src_col = source->columns[comp];
-				const Column &dst_col = destination->columns[comp];
+    	const size_t src_row = record.row;
+    	const size_t dest_row = destination->append(entity_id);
+    	for (Component comp: source->components)
+    	{
+    		if (destination->has(comp))
+    		{
+    			const Column &src_col = source->columns[comp];
+    			Column &dst_col = destination->columns[comp];
 
-				std::memcpy(
-					static_cast<char *>(dst_col.data) + (dest_row * dst_col.size),
-					static_cast<char *>(src_col.data) + (src_row * src_col.size),
-					src_col.size
-				);
-			}
-		}
+    			if (src_col.is_constructed(src_row))
+    			{
+    				const void* src_ptr = src_col.get(src_row);
+    				void* dst_ptr = dst_col.get(dest_row);
 
-		/* patch */
-		source->remove(entity_id);
-		record.archetype = destination;
-		record.row = dest_row;
-		entity_records[entity_id] = record;
-	}
+    				if (!src_ptr || !dst_ptr)
+    					continue;
+
+    				dst_col.destroy_at(dest_row);
+    				if (src_col.has_copier()) /* non-trivial */
+    				{
+    					const CopierFn copier = src_col.get_copier();
+    					copier(dst_ptr, src_ptr);
+    				}
+    				else /* trivial */
+    				{
+    					std::memcpy(dst_ptr, src_ptr, src_col.size());
+    				}
+    				dst_col.mark_constructed(dest_row);
+    			}
+    		}
+    	}
+
+    	/* patch */
+    	source->remove(entity_id);
+    	record.archetype = destination;
+    	record.row = dest_row;
+    	entity_records[entity_id] = record;
+    }
 }

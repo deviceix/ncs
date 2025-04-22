@@ -102,6 +102,8 @@ TEST(WorldTest, ComponentDataAccess)
 	EXPECT_EQ(q.size(), 1);
 
 	auto& [e, pos, vel] = q[0];
+	EXPECT_FALSE(pos == nullptr);
+	EXPECT_FALSE(vel == nullptr);
 	EXPECT_EQ(pos->x, 1.0f);
 	EXPECT_EQ(pos->y, 2.0f);
 	EXPECT_EQ(pos->z, 3.0f);

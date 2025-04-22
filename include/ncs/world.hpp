@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstring>
 #include <unordered_map>
 #include <vector>
 #include <ncs/types.hpp>
@@ -91,7 +90,7 @@ namespace ncs
         {
         	const Component cid = get_cid<T>();
         	const Column &column = archetype->columns.at(cid);
-        	return reinterpret_cast<T *>(static_cast<char *>(column.data) + (row * column.size));
+        	return column.get_as<T>(row);
         }
 
         Archetype *create_archetype(const std::vector<Component> &components);
@@ -145,22 +144,18 @@ namespace ncs
 			const size_t row = dst->append(entity_id);
 
 			Column &column = dst->columns[component_id];
-			if (column.data == nullptr)
+			if (column.size() == 0)
 			{
-				column.size = sizeof(T);
-				if (column.capacity < row + 1)
+				column.load<T>();
+				if (row >= column.capacity())
 					column.resize(std::max(size_t { 16 }, row + 1));
 			}
 
-			if (row >= column.capacity)
-				column.resize(std::max(column.capacity * 2, row + 1));
+			if (row >= column.capacity())
+				column.resize(std::max(column.capacity() * 2, row + 1));
 
-			/* copy data */
-			void *raw_ptr = static_cast<char *>(column.data) + (row * column.size);
-			if constexpr (std::is_trivially_copyable_v<T>)
-				std::memcpy(raw_ptr, &data, sizeof(T));
-			else
-				std::construct_at(static_cast<T*>(raw_ptr), data);
+			/* construct the data */
+			column.construct_at<T>(row, data);
 
 			entity_records[entity_id] = { dst, row }; /* make a new record */
 		}
@@ -170,57 +165,35 @@ namespace ncs
 			if (Archetype *current = record.archetype;
 				current->has(component_id)) /* just update the data */
 			{
-				const Column &column = current->columns[component_id];
+				Column &column = current->columns[component_id];
 				const size_t row = record.row;
 
-				if (row >= column.capacity)
-				{
-					auto &mutable_column = const_cast<Column &>(column);
-					mutable_column.resize(std::max(column.capacity * 2, row + 1));
-				}
+				if (row >= column.capacity())
+					column.resize(std::max(column.capacity() * 2, row + 1));
 
-				void *raw_ptr = static_cast<char *>(column.data) + (row * column.size);
-				if constexpr (std::is_trivially_copyable_v<T>)
-				{
-					std::memcpy(raw_ptr, &data, sizeof(T));
-				}
-				else
-				{
-					std::destroy_at(static_cast<T*>(raw_ptr));
-					std::construct_at(static_cast<T*>(raw_ptr), data);
-				}
+				/* destroy existing and construct new */
+				column.destroy_at(row);
+				column.construct_at<T>(row, data);
 
 				current->flags |= DirtyFlags::UPDATED;
 			}
 			else
 			{
 				Archetype *destination = find_archetype_with(current, component_id);
-				if (Column &column = destination->columns[component_id];
-					column.data == nullptr) /* setup col if not */
+				Column &column = destination->columns[component_id];
+				if (column.size() == 0) /* setup col if not */
 				{
-					column.size = sizeof(T);
+					column.load<T>();
 					column.resize(std::max(size_t { 16 }, destination->entities.size()));
 				}
 				move_entity(entity_id, record, destination);
 
 				const size_t row = record.row;
-				const Column &updated_column = destination->columns[component_id];
-				if (row >= updated_column.capacity)
-				{
-					auto &mutable_column = const_cast<Column &>(updated_column);
-					mutable_column.resize(std::max(updated_column.capacity * 2, row + 1));
-				}
+				if (row >= column.capacity())
+					column.resize(std::max(column.capacity() * 2, row + 1));
 
-				/* set the transferred data in the new archetype */
-				void *raw_ptr = static_cast<char *>(updated_column.data) + (row * updated_column.size);
-				if constexpr (std::is_trivially_copyable_v<T>)
-				{
-					std::memcpy(raw_ptr, &data, sizeof(T));
-				}
-				else
-				{
-					new(raw_ptr) T(data);
-				}
+				/* construct the component in the new archetype */
+				column.construct_at<T>(row, data);
 			}
 		}
 
@@ -251,7 +224,7 @@ namespace ncs
 			return nullptr;
 
 		const Column &column = arch->columns[component_id];
-		return reinterpret_cast<T *>(static_cast<char *>(column.data) + (row * column.size));
+		return column.get_as<T>(row);
 	}
 
 	template<typename T>
@@ -299,11 +272,10 @@ namespace ncs
 		if (!current->has(component_id))
 			return this;
 
-		if constexpr (!std::is_trivially_destructible_v<T>) /* destroy if not trivial type */
-		{
-			if (T *component_ptr = get<T>(e))
-				component_ptr->~T();
-		}
+		/* destroy the component if it's constructed */
+		Column &column = current->columns[component_id];
+		if (column.is_constructed(record.row))
+			column.destroy_at(record.row);
 
 		Archetype *dst = find_archetype_without(current, component_id);
 		move_entity(entity_id, record, dst);

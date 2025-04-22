@@ -1,121 +1,269 @@
 #include <cstdlib>
 #include <cstring>
-#include <new>
 #include <ncs/containers/column.hpp>
 
 namespace ncs
 {
-	Column::Column() = default;
+    Column::~Column()
+    {
+        if (ptr && dtor)
+        {
+            for (std::size_t i = 0; i < cap && i < constructed.size(); ++i)
+            {
+                if (constructed[i])
+                    dtor(static_cast<char*>(ptr) + (i * sz));
+            }
+        }
 
-	Column::~Column()
-	{
-		if (data)
-		{
-			std::free(data);
-			data = nullptr;
-		}
-	}
+        if (ptr)
+        {
+            std::free(ptr);
+            ptr = nullptr;
+        }
+    }
 
-	Column::Column(const Column &other) : size(other.size)
-	{
-		if (other.data && other.capacity > 0)
-		{
-			data = std::malloc(size * other.capacity);
-			if (data)
-				std::memcpy(data, other.data, size * other.capacity);
-			capacity = other.capacity;
-		}
-	}
+    Column::Column(const Column &other) :
+        sz(other.sz), cap(other.cap), copier(other.copier), dtor(other.dtor)
+    {
+        if (other.ptr && other.cap > 0)
+        {
+            ptr = std::malloc(other.cap * sz);
+            if (!ptr)
+                throw std::bad_alloc();
 
-	Column::Column(Column &&other) noexcept : data(other.data), size(other.size), capacity(other.capacity)
-	{
-		other.data = nullptr;
-		other.size = 0;
-		other.capacity = 0;
-	}
+            constructed = other.constructed;
 
-	Column &Column::operator=(const Column &other)
-	{
-		if (this != &other)
-		{
-			if (data)
-			{
-				std::free(data);
-				data = nullptr;
-			}
+            if (copier)
+            {
+                for (size_t i = 0; i < cap && i < constructed.size(); ++i)
+                {
+                    if (constructed[i])
+                    {
+                        void* src = static_cast<char*>(other.ptr) + (i * sz);
+                        void* dst = static_cast<char*>(ptr) + (i * sz);
+                        copier(dst, src);
+                    }
+                }
+            }
+            else
+            {
+                std::memcpy(ptr, other.ptr, other.cap * sz);
+            }
+        }
 
-			size = other.size;
-			capacity = other.capacity;
+        resize(16);
+    }
 
-			if (other.data && other.capacity > 0)
-			{
-				data = std::malloc(size * capacity);
-				if (data)
-					std::memcpy(data, other.data, size * capacity);
-			}
-		}
-		return *this;
-	}
+    Column::Column(Column &&other) noexcept :
+        ptr(other.ptr), sz(other.sz), cap(other.cap),
+        copier(other.copier), dtor(other.dtor),
+        constructed(std::move(other.constructed))
+    {
+        other.ptr = nullptr;
+        other.sz = 0;
+        other.cap = 0;
+        other.dtor = nullptr;
+        other.copier = nullptr;
+    }
 
-	Column &Column::operator=(Column &&other) noexcept
-	{
-		if (this != &other)
-		{
-			if (data)
-				std::free(data);
+    Column& Column::operator=(const Column &other)
+    {
+        if (this != &other)
+        {
+            clear();
 
-			data = other.data;
-			size = other.size;
-			capacity = other.capacity;
+            sz = other.sz;
+            dtor = other.dtor;
+            copier = other.copier;
+            cap = other.cap;
 
-			/* leave empty */
-			other.data = nullptr;
-			other.size = 0;
-			other.capacity = 0;
-		}
-		return *this;
-	}
+            if (other.ptr && other.cap > 0)
+            {
+                ptr = std::malloc(sz * other.cap);
+                if (!ptr)
+                    throw std::bad_alloc();
 
-	void Column::resize(const size_t nsz)
-	{
-		if (nsz <= capacity)
-			return;
+                constructed = other.constructed;
 
-		if (data == nullptr)
-		{
-			data = std::malloc(size * nsz);
-			if (!data)
-				throw std::bad_alloc();
-		}
-		else /* realloc existing */
-		{
-			void *new_data = std::malloc(size * nsz);
-			if (!new_data)
-				throw std::bad_alloc();
+                if (copier)
+                {
+                    for (size_t i = 0; i < cap && i < constructed.size(); ++i)
+                    {
+                        if (constructed[i])
+                        {
+                            void* src = static_cast<char*>(other.ptr) + (i * sz);
+                            void* dst = static_cast<char*>(ptr) + (i * sz);
+                            copier(dst, src);
+                        }
+                    }
+                }
+                else
+                {
+                    std::memcpy(ptr, other.ptr, other.cap * sz);
+                }
+            }
+        }
+        return *this;
+    }
 
-			if (capacity > 0 && size > 0)
-				std::memcpy(new_data, data, size * capacity);
+    Column& Column::operator=(Column &&other) noexcept
+    {
+        if (this != &other)
+        {
+            clear();
 
-			std::free(data);
-			data = new_data;
-		}
-		capacity = nsz;
-	}
+            ptr = other.ptr;
+            sz = other.sz;
+            cap = other.cap;
+            dtor = other.dtor;
+            copier = other.copier;
+            constructed = std::move(other.constructed);
 
-	void Column::clear()
-	{
-		if (data)
-		{
-			std::free(data);
-			data = nullptr;
-		}
-		capacity = 0;
-	}
+            other.ptr = nullptr;
+            other.sz = 0;
+            other.cap = 0;
+            other.dtor = nullptr;
+            other.copier = nullptr;
+        }
+        return *this;
+    }
 
-	void *Column::get(const size_t row) const
-	{
-		if (row >= capacity || !data)
-			return nullptr;
-		return static_cast<char *>(data) + (row * size);
-	}
+    void Column::resize(const std::size_t new_cap)
+    {
+        if (new_cap <= cap)
+            return;
+
+        void* new_ptr = std::malloc(sz * new_cap);
+        if (!new_ptr)
+            throw std::bad_alloc();
+
+        if (ptr && cap > 0)
+        {
+            if (copier)
+            {
+                for (size_t i = 0; i < cap && i < constructed.size(); ++i)
+                {
+                    if (constructed[i])
+                    {
+                        void* src = static_cast<char*>(ptr) + (i * sz);
+                        void* dst = static_cast<char*>(new_ptr) + (i * sz);
+                        copier(dst, src);
+                    }
+                }
+            }
+            else
+            {
+                std::memcpy(new_ptr, ptr, sz * cap);
+            }
+
+            void* old_ptr = ptr;
+            ptr = new_ptr;
+            if (dtor)
+            {
+                for (size_t i = 0; i < cap && i < constructed.size(); ++i)
+                {
+                    if (constructed[i])
+                    {
+                        void* p = static_cast<char*>(old_ptr) + (i * sz);
+                        dtor(p);
+                    }
+                }
+            }
+
+            std::free(old_ptr);
+        }
+        else
+        {
+            ptr = new_ptr;
+        }
+
+        cap = new_cap;
+        if (constructed.size() < new_cap)
+            constructed.resize(new_cap, false);
+    }
+
+    void Column::clear()
+    {
+        if (ptr && dtor)
+        {
+            for (size_t i = 0; i < cap && i < constructed.size(); ++i)
+            {
+                if (constructed[i])
+                {
+                    void* p = static_cast<char*>(ptr) + (i * sz);
+                    dtor(p);
+                }
+            }
+        }
+
+        if (ptr)
+        {
+            std::free(ptr);
+            ptr = nullptr;
+        }
+
+        cap = 0;
+        constructed.clear();
+    }
+
+    void* Column::get(const std::size_t row) const
+    {
+        if (row >= cap || !ptr)
+            return nullptr;
+        return static_cast<char*>(ptr) + (row * sz);
+    }
+
+    void Column::destroy_at(const std::size_t row)
+    {
+        if (dtor && row < cap && row < constructed.size() && constructed[row])
+        {
+            void* p = static_cast<char*>(ptr) + (row * sz);
+            dtor(p);
+            constructed[row] = false;
+        }
+    }
+
+    void Column::load_raw(const std::size_t element_size, DestructorFn destructor, const CopierFn cp)
+    {
+        sz = element_size;
+        dtor = destructor;
+        copier = cp;
+        constructed = std::vector(cap, false);
+    }
+
+    void Column::mark_constructed(const std::size_t row, const bool value)
+    {
+        if (row < constructed.size())
+            constructed[row] = value;
+    }
+
+    std::size_t Column::capacity() const
+    {
+        return cap;
+    }
+
+    std::size_t Column::size() const
+    {
+        return sz;
+    }
+
+    bool Column::has_dtor() const
+    {
+        return dtor != nullptr;
+    }
+
+    bool Column::has_copier() const
+    {
+        return copier != nullptr;
+    }
+
+    CopierFn Column::get_copier() const
+    {
+        return copier;
+    }
+
+    bool Column::is_constructed(std::size_t row) const
+    {
+        return row < constructed.size() && constructed[row];
+    }
 }
