@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest ]
+        os: [ macos-latest ]
         build_type: [ Release ]
         compiler: [ gcc, clang ]
         include:
