@@ -45,6 +45,8 @@ namespace ncs
 
 		void remove(Entity entity);
 
+		void dump();
+
 		void move(size_t row, Archetype* dest, Entity entity);
 	};
 }

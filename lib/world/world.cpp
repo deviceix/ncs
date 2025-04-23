@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstring>
+#include <ncs/base/utils.hpp>
 #include <ncs/world.hpp>
 
 namespace ncs
@@ -66,57 +67,56 @@ namespace ncs
 
     void World::despawn(const Entity entity)
 	{
-		const uint64_t entity_id = get_eid(entity);
-		const Generation gen = get_egen(entity);
-
+	    const uint64_t entity_id = get_eid(entity);
 #ifndef NDEBUG
-		/* check if the entity exists with valid generation */
-		if (const auto it = generations.find(entity_id);
-			it == generations.end() || it->second != gen)
-		{
-			return;
-		}
-#endif
+	    /* check if the entity exists with valid generation */
+    	const Generation gen = get_egen(entity);
+	    if (const auto it = generations.find(entity_id);
+	        it == generations.end() || it->second != gen)
+	    {
+	        throw InvalidEntityError(entity_id, gen, __FILE__, __LINE__);
+	    }
+	#endif
 
-		/* remove all components */
-		if (const auto record_it = entity_records.find(entity_id);
-			record_it != entity_records.end())
-		{
-			Record &record = record_it->second;
-			Archetype *archetype = record.archetype;
-			const size_t row = record.row;
+	    /* remove all components */
+	    if (const auto record_it = entity_records.find(entity_id);
+	        record_it != entity_records.end())
+	    {
+	        Record &record = record_it->second;
+	        Archetype *archetype = record.archetype;
+	        const std::size_t row = record.row;
 
-			/* first call destructors for non-trivial components */
-			for (Component comp_id: archetype->components)
-			{
-				if (Column &column = archetype->columns[comp_id];
-					column.has_dtor() && column.is_constructed(row))
-				{
-					column.destroy_at(row);
-				}
-			}
+	        /* first call destructors for non-trivial components */
+	        for (Component comp_id: archetype->components)
+	        {
+	            if (Column &column = archetype->columns[comp_id];
+	                column.has_dtor() && column.is_constructed(row))
+	            {
+	                column.destroy_at(row);
+	            }
+	        }
 
-			archetype->remove(entity_id) ;/* remove the archetype; note that this cleans up the memory as well */
-			entity_records.erase(entity_id); /* clear the record */
-		}
+	        archetype->remove(entity_id);
+	        entity_records.erase(entity_id); /* clear the record */
+	    }
 
-		const auto idx_it = entity_indices.find(entity_id);
-		if (idx_it == entity_indices.end())
-			return;
+	    const auto idx_it = entity_indices.find(entity_id);
+	    if (idx_it == entity_indices.end())
+	        return;
 
-		if (const size_t index = idx_it->second;
-			index < alive_count - 1)
-		{
-			entity_pool[index] = entity_pool[alive_count - 1];
-			entity_indices[entity_pool[index]] = index;
-		}
+	    if (const size_t index = idx_it->second;
+	        index < alive_count - 1)
+	    {
+	        entity_pool[index] = entity_pool[alive_count - 1];
+	        entity_indices[entity_pool[index]] = index;
+	    }
 
-		entity_pool[alive_count - 1] = entity_id;
-		--alive_count;
+	    entity_pool[alive_count - 1] = entity_id;
+	    --alive_count;
 
-		/* update generation for reuse */
-		generations[entity_id] = (generations[entity_id] + 1) > MAX_GENERATION ? 0 : generations[entity_id] + 1;
-		entity_indices.erase(entity_id); /* clean up entity index */
+	    /* update generation for reuse */
+	    generations[entity_id] = (generations[entity_id] + 1) > MAX_GENERATION ? 0 : generations[entity_id] + 1;
+	    entity_indices.erase(entity_id); /* clean up entity index */
 	}
 
 	Entity World::encode_entity(const uint64_t id, const Generation gen)

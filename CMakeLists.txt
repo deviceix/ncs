@@ -59,6 +59,7 @@ if (NCS_BUILD_TESTS)
     set(NCS_TEST ${PROJECT_NAME}-test)
 
     add_executable(${NCS_TEST}
+            tests/column.cpp
             tests/crud.cpp
             tests/lifecycle.cpp
             tests/query.cpp

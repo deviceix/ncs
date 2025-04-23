@@ -88,7 +88,9 @@ namespace ncs
         T* get_as(const std::size_t row) const
         {
             void* p = get(row);
-            return p ? static_cast<T*>(p) : nullptr;
+            if (p && row < constructed.size() && constructed[row])
+                return static_cast<T*>(p);
+            return nullptr;
         }
 
         template<typename T>

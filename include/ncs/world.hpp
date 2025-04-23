@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <unordered_map>
 #include <vector>
 #include <ncs/types.hpp>
@@ -106,10 +107,10 @@ namespace ncs
 
 		void move_entity(Entity entity, Record &record, Archetype *destination);
 
-		std::unordered_map<uint64_t, Archetype *> archetypes;
+		std::unordered_map<std::uint64_t, Archetype *> archetypes;
 		std::unordered_map<Entity, Record> entity_records;
 		std::unordered_map<Component, void(*)(void *)> cdtors;
-		std::unordered_map<uint64_t, std::pair<void *, void(*)(void *)> > qcaches; /* type-erased query caches */
+		std::unordered_map<std::uint64_t, std::pair<void *, void(*)(void *)> > qcaches; /* type-erased query caches */
 
 		std::unordered_map<Entity, Generation> generations; /* a sparse set to track decoded entity's id */
 		/* maps entity ids to their index poses in the entity pools */
@@ -128,11 +129,10 @@ namespace ncs
 	template<typename T>
 	World *World::set(const Entity e, const T &data)
 	{
-		const uint64_t entity_id = get_eid(e);
-		const Generation gen = get_egen(e);
-
+		const std::uint64_t entity_id = get_eid(e);
 #ifndef NDEBUG
 		/* if it is valid; */
+		const Generation gen = get_egen(e);
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
@@ -209,14 +209,13 @@ namespace ncs
 	World *World::set(Entity e, T &&data)
 	{
 		const uint64_t entity_id = get_eid(e);
-		const Generation gen = get_egen(e);
-
 #ifndef NDEBUG
 		/* if it is valid; */
+		const Generation gen = get_egen(e);
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
-			return this;
+			throw InvalidEntityError(entity_id, gen, __FILE__, __LINE__);
 		}
 #endif
 
@@ -226,7 +225,7 @@ namespace ncs
 		{
 			/* start checking from the root archetype; entity doesn't exist yet */
 			Archetype *dst = find_archetype_with(root_archetype, component_id);
-			const size_t row = dst->append(entity_id);
+			const std::size_t row = dst->append(entity_id);
 
 			Column &column = dst->columns[component_id];
 			if (column.size() == 0)
@@ -251,8 +250,7 @@ namespace ncs
 				current->has(component_id)) /* just update the data */
 			{
 				Column &column = current->columns[component_id];
-				const size_t row = record.row;
-
+				const std::size_t row = record.row;
 				if (row >= column.capacity())
 					column.resize(std::max(column.capacity() * 2, row + 1));
 
@@ -273,7 +271,7 @@ namespace ncs
 				}
 				move_entity(entity_id, record, destination);
 
-				const size_t row = record.row;
+				const std::size_t row = record.row;
 				if (row >= column.capacity())
 					column.resize(std::max(column.capacity() * 2, row + 1));
 
@@ -289,14 +287,13 @@ namespace ncs
 	T *World::get(const Entity e)
 	{
 		const uint64_t entity_id = get_eid(e);
-		const Generation gen = get_egen(e);
-
 #ifndef NDEBUG
 		/* if it is valid; */
+		const Generation gen = get_egen(e);
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
-			return nullptr;
+			throw InvalidEntityError(entity_id, gen, __FILE__, __LINE__);
 		}
 #endif
 
@@ -317,39 +314,37 @@ namespace ncs
 	template<typename T>
 	bool World::has(const Entity e)
 	{
-		const uint64_t entity_id = get_eid(e);
+	    const uint64_t entity_id = get_eid(e);
 		const Generation gen = get_egen(e);
 
-#ifndef NDEBUG
-		/* if it is valid; */
-		if (const auto it = generations.find(entity_id);
+		/* if it is valid; this is required */
+	    if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
-		{
-			return false;
-		}
-#endif
+	    {
+		    return false;
+	    }
 
-		const Component component_id = get_cid<T>();
-		const auto it = entity_records.find(entity_id);
-		if (it == entity_records.end())
-			return false;
+	    const Component component_id = get_cid<T>();
+	    const auto it = entity_records.find(entity_id);
+	    if (it == entity_records.end())
+	        return false;
 
-		const Archetype *archetype = it->second.archetype;
-		return archetype->has(component_id);
+	    const Archetype *archetype = it->second.archetype;
+	    return archetype->has(component_id);
 	}
 
 	template<typename T>
 	World *World::remove(const Entity e)
 	{
 		const uint64_t entity_id = get_eid(e);
-		const Generation gen = get_egen(e);
 
 #ifndef NDEBUG
 		/* if it is valid; */
+		const Generation gen = get_egen(e);
 		if (const auto it = generations.find(entity_id);
 			it == generations.end() || it->second != gen)
 		{
-			return this;
+			throw InvalidEntityError(entity_id, gen, __FILE__, __LINE__);
 		}
 #endif
 

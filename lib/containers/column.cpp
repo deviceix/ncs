@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <ncs/containers/column.hpp>
 
 namespace ncs

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <ncs/containers/archetype.hpp>
 
 namespace ncs
@@ -26,60 +27,98 @@ namespace ncs
 		return std::ranges::find(components, c) != components.end();
 	}
 
-	void Archetype::remove(const Entity entity)
-    {
-        /* entity here is expected to be raw id */
-        const auto it = entity_rows.find(entity);
-        if (it == entity_rows.end())
-            return;
+    void Archetype::remove(const Entity entity)
+	{
+	    /* entity here is expected to be raw id */
+	    const auto it = entity_rows.find(entity);
+	    if (it == entity_rows.end())
+	        return;
 
-        const size_t row = it->second;
-        if (const size_t last_row = entity_count - 1;
-            row != last_row)
-        {
-            /* move the last entity to this row; O(1) for appending last */
-            const Entity last_entity = entities[last_row];
+	    const size_t row = it->second;
+	    const size_t last_row = entity_count - 1;
 
-            for (auto &[comp_id, column]: columns)
-            {
-                if (column.is_constructed(last_row))
-                {
-                    void* dst = static_cast<char*>(column.get(row));
-                    void* src = static_cast<char*>(column.get(last_row));
+	    if (row != last_row)
+	    {
+	        /* move the last entity to this row; O(1) for appending last */
+	        const Entity last_entity = entities[last_row];
 
-                    column.destroy_at(row);
-                    if (column.has_copier())
-                    {
-                        /* non-trivial */
-                        CopierFn copier = column.get_copier();
-                        copier(dst, src);
-                        column.mark_constructed(row);
-                    }
-                    else /* trivially copyable types */
-                    {
-                        std::memcpy(dst, src, column.size());
-                        column.mark_constructed(row);
-                    }
+	        for (auto &[comp_id, column]: columns)
+	        {
+	            if (column.is_constructed(last_row))
+	            {
+	                void* dst = static_cast<char*>(column.get(row));
+	                void* src = static_cast<char*>(column.get(last_row));
 
-                    column.destroy_at(last_row);
-                }
-            }
+	                column.destroy_at(row);
+	                if (column.has_copier())
+	                {
+	                    /* non-trivial */
+	                    CopierFn copier = column.get_copier();
+	                    copier(dst, src);
+	                }
+	                else /* trivially copyable types */
+	                {
+	                    std::memcpy(dst, src, column.size());
+	                }
 
-            entities[row] = last_entity;
-            entity_rows[last_entity] = row;
-        }
-        else
-        {
-            /* if we're removing the last entity, just destroy its components */
-            for (auto &[comp_id, column]: columns)
-                column.destroy_at(row);
-        }
+	                column.mark_constructed(row);
+	                column.destroy_at(last_row);
+	            }
+	        }
 
-        /* clear the last entity */
-        entity_count--;
-        entity_rows.erase(entity);
-        flags |= DirtyFlags::REMOVED; /* mark as removed */
-    }
+	    	/* update state */
+	        entities[row] = last_entity;
+	        entity_rows[last_entity] = row;
+	    }
+	    else
+	    {
+	        /* if we're removing the last entity, just destroy its components */
+	        for (auto &[comp_id, column]: columns)
+	            column.destroy_at(row);
+	    }
+
+	    /* clear the last entity */
+	    entity_count--;
+	    entity_rows.erase(entity);
+	    entities[last_row] = 0;
+	    flags |= DirtyFlags::REMOVED; /* mark as removed */
+	}
+
+	void Archetype::dump()
+	{
+		std::cout << "archetype dump:" << std::endl;
+		std::cout << "  id: " << id << std::endl;
+		std::cout << "  entity count: " << entity_count << std::endl;
+
+		std::cout << "  existing components:" << std::endl;
+		for (auto comp : components)
+			std::cout << "    " << comp << std::endl;
+
+		std::cout << "  entities:" << std::endl;
+		for (size_t i = 0; i < entity_count; ++i)
+			std::cout << "    [" << i << "]: " << entities[i] << std::endl;
+
+		std::cout << "  entity wows:" << std::endl;
+		for (const auto& [entity, row] : entity_rows)
+			std::cout << "    entity " << entity << " at row " << row << std::endl;
+
+		std::cout << "  columns:" << std::endl;
+		for (const auto& [comp, column] : columns)
+		{
+			std::cout << "    component " << comp
+					  << " (capacity: " << column.capacity()
+					  << ", constructed rows: ";
+
+			for (size_t i = 0; i < column.capacity(); ++i)
+			{
+				if (column.is_constructed(i))
+					std::cout << i << " ";
+			}
+			std::cout << ")" << std::endl;
+		}
+
+		std::cout << "  flags: " << static_cast<uint64_t>(flags) << std::endl;
+	}
 
     void Archetype::move(const size_t row, Archetype* dest, const Entity entity)
     {
