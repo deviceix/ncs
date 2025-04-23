@@ -41,10 +41,10 @@ if(SANITIZER_FLAGS)
 endif()
 
 add_library(${PROJECT_NAME}
+        lib/base/utils.cpp
         lib/containers/archetypes.cpp
         lib/containers/column.cpp
-        lib/world/world.cpp
-        lib/utils.cpp
+        lib/world.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

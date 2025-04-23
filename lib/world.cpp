@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <cstring>
-#include <ncs/base/utils.hpp>
-#include <ncs/world.hpp>
+#include <../include/ncs/base/utils.hpp>
+#include <../include/ncs/world.hpp>
 
 namespace ncs
 {
